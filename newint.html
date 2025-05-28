@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intermediate Code Generator</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.css">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #eef5ff;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      max-width: 900px;
+      margin: auto;
+    }
+    h1 {
+      text-align: center;
+      color: #007bff;
+    }
+    #editor {
+      height: 300px;
+      border: 1px solid #ccc;
+    }
+    button {
+      display: block;
+      margin: 20px auto;
+      padding: 10px 20px;
+      font-size: 16px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    pre {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 20px;
+      white-space: pre-wrap;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Intermediate Code Generator</h1>
+  <textarea id="editor">int a = 5, b = 10;
+int c = 5;
+c = a + b * 2;
+if (c > 10) {
+  c = c - 5;
+} else {
+  c = c + 5;
+}
+for (int i = 0; i < 3; i = i + 1) {
+  c = c + i;
+}</textarea>
+  <button onclick="generateICG()">Generate TAC</button>
+  <h2>Three Address Code:</h2>
+  <pre id="output"></pre>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/clike/clike.min.js"></script>
+<script>
+  const editor = CodeMirror.fromTextArea(document.getElementById("editor"), {
+    lineNumbers: true,
+    mode: "text/x-csrc",
+    theme: "default"
+  });
+
+  function generateICG() {
+    const code = editor.getValue();
+    const lines = code.split('\n').map(line => line.trim()).filter(l => l && !l.startsWith('#'));
+    const tac = [];
+    let temp = 1, label = 1;
+
+    const newTemp = () => `t${temp++}`;
+    const newLabel = () => `L${label++}`;
+
+    function parseExpr(expr) {
+      expr = expr.trim();
+      const binaryOps = ['+', '-', '*', '/'];
+
+      for (let op of binaryOps) {
+        let index = expr.lastIndexOf(op);
+        if (index > 0) {
+          const left = expr.substring(0, index).trim();
+          const right = expr.substring(index + 1).trim();
+          const t1 = parseExpr(left);
+          const t2 = parseExpr(right);
+          const t = newTemp();
+          tac.push(`${t} = ${t1} ${op} ${t2}`);
+          return t;
+        }
+      }
+      return expr;
+    }
+
+    let i = 0;
+    while (i < lines.length) {
+      let line = lines[i];
+
+      // Handle for loop
+      if (line.startsWith("for")) {
+        const forParts = line.match(/for\s*\(([^;]+);([^;]+);([^\)]+)\)/);
+        if (forParts) {
+          const init = forParts[1].trim();
+          const cond = forParts[2].trim();
+          const iter = forParts[3].trim();
+          const L1 = newLabel(), L2 = newLabel(), L3 = newLabel();
+
+          tac.push(`// for loop`);
+          tac.push(`${init}`);
+          tac.push(`${L1}:`);
+          tac.push(`if ${cond} goto ${L2}`);
+          tac.push(`goto ${L3}`);
+          tac.push(`${L2}:`);
+          i++;
+          while (!lines[i].includes("}")) {
+            if (lines[i]) {
+              tac.push(parseLine(lines[i]));
+            }
+            i++;
+          }
+          tac.push(`${iter}`);
+          tac.push(`goto ${L1}`);
+          tac.push(`${L3}:`);
+        }
+      } else if (line.startsWith("if")) {
+        const condMatch = line.match(/if\s*\((.*)\)/);
+        if (condMatch) {
+          const cond = condMatch[1];
+          const L1 = newLabel(), L2 = newLabel(), L3 = newLabel();
+
+          tac.push(`// if condition`);
+          tac.push(`if ${cond} goto ${L1}`);
+          tac.push(`goto ${L2}`);
+          tac.push(`${L1}:`);
+          i++;
+          while (!lines[i].includes("}")) tac.push(parseLine(lines[i++]));
+          i++;
+          if (lines[i] && lines[i].startsWith("else")) {
+            tac.push(`goto ${L3}`);
+            tac.push(`${L2}:`);
+            i++;
+            while (!lines[i].includes("}")) tac.push(parseLine(lines[i++]));
+            tac.push(`${L3}:`);
+          } else {
+            tac.push(`${L2}:`);
+          }
+        }
+      } else {
+        tac.push(parseLine(line));
+      }
+      i++;
+    }
+
+    function parseLine(line) {
+      if (line.includes("=") && !line.includes("==")) {
+        const [lhs, rhs] = line.split("=").map(x => x.replace(/;/g, '').trim());
+        const result = parseExpr(rhs);
+        return `${lhs} = ${result}`;
+      }
+      return `// Unparsed: ${line}`;
+    }
+
+    document.getElementById("output").textContent = tac.join("\n");
+  }
+</script>
+</body>
+</html>
